@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Virtual Flipbook Scrapbook</title>
+  <style>
+    :root{--bg:#fdeef2;--rose:#9b2b3a;--button:#ff7b8a}
+    *{box-sizing:border-box}
+    body{font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:linear-gradient(180deg,#fff,#fff); margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .container{width:100%;max-width:1100px;background:linear-gradient(180deg,#fff,#fff);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.12);overflow:hidden}
+    .intro{background: radial-gradient(circle at 20% 10%, #fff0 0, #fff0 40%), linear-gradient(180deg,var(--bg), #ffeef3);padding:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px}
+    .hearts{position:absolute;inset:0;pointer-events:none;opacity:.14;background-image:radial-gradient(circle at 10% 20%, rgba(255,255,255,.4) 0, transparent 2px), radial-gradient(circle at 80% 60%, rgba(255,255,255,.25) 0, transparent 2px)}
+    .intro h1{color:var(--rose);font-size:28px;margin:0 0 12px;text-align:center}
+    .intro p{color:var(--rose);opacity:.95;font-size:16px;text-align:center;line-height:1.5;max-width:720px;margin:0 0 22px}
+    .open-btn{background:var(--button);color:#fff;border:none;padding:12px 22px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 10px 26px rgba(255,123,138,.18)}
+    .book-wrap{display:none;padding:20px;gap:18px;background:linear-gradient(180deg,#fff,#fff)}
+    .spine{position:absolute;left:50%;top:0;bottom:0;width:6px;background:linear-gradient(90deg,#f3e9ea,#f6f0f1);transform:translateX(-50%)}
+    .pages{display:flex;gap:16px;align-items:center;justify-content:center}
+    .canvas-page{background:#fff;border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.06);flex:1 1 0;display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;height:66vh}
+    canvas{width:100%;height:100%;display:block}
+    .controls{display:flex;gap:10px;align-items:center;justify-content:center;padding:18px}
+    .controls button{background:var(--button);border:none;padding:10px 14px;color:#fff;border-radius:10px;font-weight:600;cursor:pointer}
+    .controls button:disabled{opacity:.45;cursor:not-allowed}
+    .page-indicator{position:relative;text-align:center;color:#666;padding:8px 12px;border-radius:999px;font-weight:600}
+    @media (max-width:900px){.canvas-page{height:56vh}.intro{padding:28px}.intro h1{font-size:22px}.intro p{font-size:15px}}
+    @media (max-width:640px){.pages{flex-direction:column}.spine{display:none}.canvas-page{height:56vh}}
+    .hide{display:none}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- INTRO SCREEN -->
+    <div id="intro" class="intro">
+      <div class="hearts" aria-hidden></div>
+      <h1>Hi love, I made this little flipbook for you 💖</h1>
+      <p>Tap below to open it while our song plays. Enjoy flipping through the pages — the music will keep playing softly in the background.</p>
+      <button id="openBtn" class="open-btn">Open Flipbook 💕</button>
+    </div>
+
+    <!-- BOOK (hidden until opened) -->
+    <div id="book" class="book-wrap">
+      <div style="position:relative">
+        <div class="spine" aria-hidden></div>
+        <div class="pages">
+          <div class="canvas-page"><canvas id="leftPage"></canvas></div>
+          <div class="canvas-page"><canvas id="rightPage"></canvas></div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px">
+        <div id="indicator" class="page-indicator">Page 1 - 2</div>
+        <div class="controls">
+          <button id="prev">◀ Prev</button>
+          <button id="next">Next ▶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio (streaming). If you want a music file, upload a small mp3 to the repo and set MUSIC_URL to the raw link. -->
+  <script>
+    // --- CONFIG ---
+    const MUSIC_URL = ''; // paste a direct mp3 raw link if you want music; leave empty to add later
+    const PDF_FILENAME = 'scrapbook.pdf';
+    const MUSIC_VOLUME = 0.18;
+
+    const intro = document.getElementById('intro');
+    const book = document.getElementById('book');
+    const openBtn = document.getElementById('openBtn');
+    const leftCanvas = document.getElementById('leftPage');
+    const rightCanvas = document.getElementById('rightPage');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+    const indicator = document.getElementById('indicator');
+
+    const audio = new Audio();
+    if(MUSIC_URL){
+      audio.src = MUSIC_URL;
+      audio.loop = false;
+      audio.volume = MUSIC_VOLUME;
+      audio.preload = 'auto';
+      audio.addEventListener('ended', ()=>{ setTimeout(()=>{ try{ audio.currentTime = 0; audio.play(); }catch(e){} }, 10); });
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+    script.onload = () => initPDF();
+    document.head.appendChild(script);
+
+    let pdfDoc = null;
+    let currentSpread = 0;
+    let totalSpreads = 0;
+
+    function initPDF(){
+      const pdfjsLib = window['pdfjsLib'];
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+      pdfjsLib.getDocument(PDF_FILENAME).promise.then(doc=>{
+        pdfDoc = doc;
+        totalSpreads = Math.ceil(pdfDoc.numPages / 2);
+      }).catch(err=>{
+        console.error(err);
+        indicator.textContent = 'Make sure "' + PDF_FILENAME + '" is in the same folder.';
+      });
+    }
+
+    function renderSpread(spreadIndex){
+      if(!pdfDoc) return;
+      const leftPageNum = spreadIndex*2 + 1;
+      const rightPageNum = spreadIndex*2 + 2;
+
+      indicator.textContent = `Page ${leftPageNum} - ${Math.min(rightPageNum, pdfDoc.numPages)} of ${pdfDoc.numPages}`;
+      renderPageToCanvas(leftPageNum, leftCanvas);
+      if(rightPageNum <= pdfDoc.numPages) renderPageToCanvas(rightPageNum, rightCanvas);
+      else { const ctx = rightCanvas.getContext('2d'); ctx.clearRect(0,0,rightCanvas.width,rightCanvas.height); }
+      prevBtn.disabled = (spreadIndex === 0);
+      nextBtn.disabled = (spreadIndex >= totalSpreads - 1);
+    }
+
+    function renderPageToCanvas(pageNum, canvas){
+      if(pageNum < 1 || pageNum > pdfDoc.numPages) return;
+      pdfDoc.getPage(pageNum).then(page=>{
+        const container = canvas.parentElement.getBoundingClientRect();
+        const initialViewport = page.getViewport({scale:1});
+        const scale = Math.min((container.width - 4) / initialViewport.width, (container.height - 4) / initialViewport.height);
+        const viewport = page.getViewport({scale: scale});
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+        page.render({canvasContext: ctx, viewport: viewport});
+      });
+    }
+
+    prevBtn.addEventListener('click', ()=>{ if(currentSpread>0){ currentSpread--; renderSpread(currentSpread);} });
+    nextBtn.addEventListener('click', ()=>{ if(currentSpread < totalSpreads-1){ currentSpread++; renderSpread(currentSpread);} });
+
+    document.addEventListener('keydown', e=>{ if(e.key === 'ArrowRight') nextBtn.click(); if(e.key === 'ArrowLeft') prevBtn.click(); });
+
+    let touchStartX = null;
+    document.addEventListener('touchstart', e=>{ touchStartX = e.touches[0].clientX; });
+    document.addEventListener('touchend', e=>{ if(!touchStartX) return; const diff = e.changedTouches[0].clientX - touchStartX; if(diff < -40) nextBtn.click(); if(diff > 40) prevBtn.click(); touchStartX = null; });
+
+    openBtn.addEventListener('click', async ()=>{
+      intro.style.display = 'none';
+      book.style.display = 'block';
+      if(MUSIC_URL){ try{ await audio.play(); }catch(e){ console.warn('Audio play failed:', e); } }
+      if(pdfDoc){ renderSpread(currentSpread); } else { const waitForPdf = setInterval(()=>{ if(pdfDoc){ clearInterval(waitForPdf); renderSpread(currentSpread);} }, 250); }
+    });
+
+    let resizeTimeout;
+    window.addEventListener('resize', ()=>{ clearTimeout(resizeTimeout); resizeTimeout = setTimeout(()=>{ renderSpread(currentSpread); }, 220); });
+  </script>
+</body>
+</html>
